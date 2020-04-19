@@ -9,10 +9,8 @@ import (
 	runtimeDebug "runtime/debug"
 	"runtime/pprof"
 
-	"github.com/aaronjanse/3mux/keypress"
+	"github.com/aaronjanse/3mux/ecma48"
 	"github.com/aaronjanse/3mux/render"
-
-	term "github.com/nsf/termbox-go"
 )
 
 // Rect is a rectangle with an origin x, origin y, width, and height
@@ -52,13 +50,17 @@ func main() {
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			fatalShutdownNow(err.Error())
+			log.Fatal(err.Error())
 		}
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
 
-	termW, termH, _ = keypress.GetTermSize()
+	var err error
+	termW, termH, err = GetTermSize()
+	if err != nil {
+		log.Fatalf("While getting terminal size: %s", err.Error())
+	}
 
 	renderer = render.NewRenderer()
 	go renderer.ListenToQueue()
@@ -93,7 +95,7 @@ func main() {
 		go doDemo()
 	}
 
-	keypress.Listen(handleInput)
+	Listen(handleInput)
 }
 
 func resize(w, h int) {
@@ -114,12 +116,18 @@ func resize(w, h int) {
 }
 
 func shutdownNow() {
-	term.Close()
+	if *cpuprofile != "" {
+		pprof.StopCPUProfile()
+	}
+	Shutdown()
 	os.Exit(0)
 }
 
 func fatalShutdownNow(where string) {
-	term.Close()
+	if *cpuprofile != "" {
+		pprof.StopCPUProfile()
+	}
+	Shutdown()
 	fmt.Println("Error during:", where)
 	fmt.Println("Tiling state:", root.serialize())
 	fmt.Println(string(runtimeDebug.Stack()))
@@ -158,12 +166,12 @@ func debug(s string) {
 				X: i,
 				Y: termH - 1,
 				Style: render.Style{
-					Bg: render.Color{
-						ColorMode: render.ColorBit3Bright,
+					Bg: ecma48.Color{
+						ColorMode: ecma48.ColorBit3Bright,
 						Code:      2,
 					},
-					Fg: render.Color{
-						ColorMode: render.ColorBit3Normal,
+					Fg: ecma48.Color{
+						ColorMode: ecma48.ColorBit3Normal,
 						Code:      0,
 					},
 				},
@@ -182,12 +190,12 @@ func debug(s string) {
 					X: termW - len(resizeText) + i,
 					Y: termH - 1,
 					Style: render.Style{
-						Bg: render.Color{
-							ColorMode: render.ColorBit3Bright,
+						Bg: ecma48.Color{
+							ColorMode: ecma48.ColorBit3Bright,
 							Code:      3,
 						},
-						Fg: render.Color{
-							ColorMode: render.ColorBit3Normal,
+						Fg: ecma48.Color{
+							ColorMode: ecma48.ColorBit3Normal,
 							Code:      0,
 						},
 					},

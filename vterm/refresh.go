@@ -28,15 +28,12 @@ func (v *VTerm) useSlowRefresh() {
 				return
 			}
 
-			v.RedrawWindow()
+			v.forceRedrawWindow()
+			v.forceRefreshCursor()
 		}
 	}()
 }
 
 func (v *VTerm) useFastRefresh() {
-	if !v.usingSlowRefresh {
-		return
-	}
-
 	v.usingSlowRefresh = false
 }

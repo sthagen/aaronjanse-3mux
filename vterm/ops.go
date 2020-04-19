@@ -12,7 +12,7 @@ func (v *VTerm) ScrollbackReset() {
 
 // ScrollbackUp shifts the screen contents up, with scrollback
 func (v *VTerm) ScrollbackUp() {
-	if v.usingAltScreen {
+	if v.UsingAltScreen {
 		return
 	}
 
@@ -24,7 +24,7 @@ func (v *VTerm) ScrollbackUp() {
 
 // ScrollbackDown shifts the screen contents down, with scrollback
 func (v *VTerm) ScrollbackDown() {
-	if v.usingAltScreen {
+	if v.UsingAltScreen {
 		return
 	}
 
@@ -40,6 +40,12 @@ func (v *VTerm) ScrollbackDown() {
 
 // RefreshCursor refreshes the ncurses cursor position
 func (v *VTerm) RefreshCursor() {
+	if !v.usingSlowRefresh {
+		v.forceRefreshCursor()
+	}
+}
+
+func (v *VTerm) forceRefreshCursor() {
 	if v.IsPaused {
 		return
 	}
@@ -49,7 +55,7 @@ func (v *VTerm) RefreshCursor() {
 // scrollUp shifts screen contents up and adds blank lines to the bottom of the screen.
 // Lines pushed out of view are put in the scrollback.
 func (v *VTerm) scrollUp(n int) {
-	if !v.usingAltScreen {
+	if !v.UsingAltScreen {
 		rows := v.Screen[v.scrollingRegion.top : v.scrollingRegion.top+n]
 		v.Scrollback = append(v.Scrollback, rows...)
 	}
@@ -57,6 +63,9 @@ func (v *VTerm) scrollUp(n int) {
 	newLines := make([][]render.Char, n)
 	for i := range newLines {
 		newLines[i] = make([]render.Char, v.w)
+		for x := range newLines[i] {
+			newLines[i][x].Style = v.Cursor.Style
+		}
 	}
 
 	v.Screen = append(append(append(
@@ -128,24 +137,45 @@ func (v *VTerm) shiftCursorY(diff int) {
 }
 
 // putChar renders as given character using the cursor stored in vterm
-func (v *VTerm) putChar(ch rune) {
-	if v.Cursor.Y >= v.h || v.Cursor.Y < 0 || v.Cursor.X > v.w || v.Cursor.X < 0 {
+func (v *VTerm) putChar(ch rune, wide bool) {
+	var rWidth int
+	if wide {
+		rWidth = 2
+	} else {
+		rWidth = 1
+	}
+
+	if v.Cursor.X > v.w-rWidth+1 {
+		v.setCursorX(0)
+		if v.Cursor.Y == v.scrollingRegion.bottom {
+			v.scrollUp(1)
+		} else {
+			v.shiftCursorY(1)
+		}
+	}
+
+	if v.Cursor.Y >= v.h || v.Cursor.Y < 0 || v.Cursor.X >= v.w || v.Cursor.X < 0 {
 		return
 	}
 
 	char := render.Char{
-		Rune:  ch,
-		Style: v.Cursor.Style,
+		Rune:   ch,
+		IsWide: rWidth > 1,
+		Style:  v.Cursor.Style,
 	}
 
 	if v.Cursor.Y >= 0 && v.Cursor.Y < len(v.Screen) {
-		if v.Cursor.X >= 0 && v.Cursor.X < len(v.Screen[v.Cursor.Y]) {
+		if v.Cursor.X >= 0 && v.Cursor.X < len(v.Screen[v.Cursor.Y])-rWidth+1 {
 			v.Screen[v.Cursor.Y][v.Cursor.X] = char
+			if rWidth > 1 { // WARN: assumes max width of two
+				v.Screen[v.Cursor.Y][v.Cursor.X+1] = render.Char{PrevWide: true, Style: v.Cursor.Style}
+			}
 		}
 	}
 
 	positionedChar := render.PositionedChar{
 		Rune:   ch,
+		IsWide: rWidth > 1,
 		Cursor: v.Cursor,
 	}
 
@@ -153,10 +183,12 @@ func (v *VTerm) putChar(ch rune) {
 	positionedChar.Cursor.Y += v.y
 
 	// TODO: print to the window based on scrolling position
-	v.renderer.HandleCh(positionedChar)
+	if !v.usingSlowRefresh {
+		v.renderer.HandleCh(positionedChar)
+	}
 
 	if v.Cursor.X < v.w {
-		v.Cursor.X++
+		v.Cursor.X += rWidth
 	}
 
 	v.RefreshCursor()
@@ -165,6 +197,12 @@ func (v *VTerm) putChar(ch rune) {
 // RedrawWindow redraws the screen into ncurses from scratch.
 // This should be reserved for operations not yet formalized into a generic, efficient function.
 func (v *VTerm) RedrawWindow() {
+	if !v.usingSlowRefresh {
+		v.forceRedrawWindow()
+	}
+}
+
+func (v *VTerm) forceRedrawWindow() {
 	if v.ScrollbackPos < v.h {
 		for y := 0; y < v.h-v.ScrollbackPos; y++ {
 			for x := 0; x < v.w; x++ {
@@ -173,7 +211,9 @@ func (v *VTerm) RedrawWindow() {
 				}
 
 				ch := render.PositionedChar{
-					Rune: v.Screen[y][x].Rune,
+					Rune:     v.Screen[y][x].Rune,
+					IsWide:   v.Screen[y][x].IsWide,
+					PrevWide: v.Screen[y][x].PrevWide,
 					Cursor: render.Cursor{
 						X: v.x + x, Y: v.y + y + v.ScrollbackPos, Style: v.Screen[y][x].Style,
 					},
@@ -199,7 +239,9 @@ func (v *VTerm) RedrawWindow() {
 
 				if x < len(v.Scrollback[idx]) {
 					ch := render.PositionedChar{
-						Rune: v.Scrollback[idx][x].Rune,
+						Rune:     v.Scrollback[idx][x].Rune,
+						IsWide:   v.Scrollback[idx][x].IsWide,
+						PrevWide: v.Scrollback[idx][x].PrevWide,
 						Cursor: render.Cursor{
 							X: v.x + x, Y: v.y + y, Style: v.Scrollback[idx][x].Style,
 						},
