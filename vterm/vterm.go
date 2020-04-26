@@ -6,7 +6,7 @@ A Char is a character printed using a given cursor (which is stored alongside th
 package vterm
 
 import (
-	"github.com/aaronjanse/3mux/render"
+	"github.com/aaronjanse/3mux/ecma48"
 )
 
 // ScrollingRegion holds the state for an ANSI scrolling region
@@ -24,33 +24,26 @@ type VTerm struct {
 	x, y, w, h int
 
 	// visible screen; char cursor coords are ignored
-	Screen [][]render.Char
+	Screen [][]ecma48.StyledChar
 
 	// Scrollback[0] is the line farthest from the screen
-	Scrollback    [][]render.Char // disabled when using alt screen; char cursor coords are ignored
-	ScrollbackPos int             // ScrollbackPos is the number of lines of scrollback visible
+	Scrollback    [][]ecma48.StyledChar // disabled when using alt screen; char cursor coords are ignored
+	ScrollbackPos int                   // ScrollbackPos is the number of lines of scrollback visible
 
 	UsingAltScreen bool
-	screenBackup   [][]render.Char
+	screenBackup   [][]ecma48.StyledChar
 
 	NeedsRedraw bool
 
-	startTime        int64
 	runeCounter      uint64
 	usingSlowRefresh bool
 
-	Cursor render.Cursor
+	Cursor ecma48.Cursor
 
-	renderer *render.Renderer
-
-	// TODO: delete `blankLine`
-	blankLine []render.Char
+	renderer ecma48.Renderer
 
 	// parentSetCursor sets physical host's cursor taking the pane location into account
 	parentSetCursor func(x, y int)
-
-	in  <-chan rune
-	out chan<- rune
 
 	storedCursorX, storedCursorY int
 
@@ -59,22 +52,20 @@ type VTerm struct {
 	ChangePause   chan bool
 	IsPaused      bool
 	DebugSlowMode bool
-
-	parser *Parser
 }
 
 // NewVTerm returns a VTerm ready to be used by its exported methods
-func NewVTerm(renderer *render.Renderer, parentSetCursor func(x, y int)) *VTerm {
+func NewVTerm(renderer ecma48.Renderer, parentSetCursor func(x, y int)) *VTerm {
 	w := 10
 	h := 10
 
-	screen := [][]render.Char{}
+	screen := [][]ecma48.StyledChar{}
 	for j := 0; j < h; j++ {
-		row := []render.Char{}
+		row := []ecma48.StyledChar{}
 		for i := 0; i < w; i++ {
-			row = append(row, render.Char{
+			row = append(row, ecma48.StyledChar{
 				Rune:  ' ',
-				Style: render.Style{},
+				Style: ecma48.Style{},
 			})
 		}
 		screen = append(screen, row)
@@ -84,11 +75,10 @@ func NewVTerm(renderer *render.Renderer, parentSetCursor func(x, y int)) *VTerm 
 		x: 0, y: 0,
 		w:                w,
 		h:                h,
-		blankLine:        []render.Char{},
 		Screen:           screen,
-		Scrollback:       [][]render.Char{},
+		Scrollback:       [][]ecma48.StyledChar{},
 		UsingAltScreen:   false,
-		Cursor:           render.Cursor{},
+		Cursor:           ecma48.Cursor{},
 		usingSlowRefresh: false,
 		renderer:         renderer,
 		parentSetCursor:  parentSetCursor,
@@ -97,13 +87,6 @@ func NewVTerm(renderer *render.Renderer, parentSetCursor func(x, y int)) *VTerm 
 		ChangePause:      make(chan bool, 1),
 		IsPaused:         false,
 		DebugSlowMode:    false,
-		parser: &Parser{
-			state:        StateGround,
-			private:      nil,
-			intermediate: "",
-			params:       "",
-			final:        nil,
-		},
 	}
 
 	return v
@@ -116,26 +99,21 @@ func (v *VTerm) Kill() {
 
 // Reshape safely updates a VTerm's width & height
 func (v *VTerm) Reshape(x, y, w, h int) {
-
 	v.x = x
 	v.y = y
-
-	for y := 0; y <= h; y++ {
-		if y >= len(v.Screen) {
-			v.Screen = append(v.Screen, []render.Char{})
-		}
-
-		for x := 0; x <= w; x++ {
-			if x >= len(v.Screen[y]) {
-				v.Screen[y] = append(v.Screen[y], render.Char{Rune: ' ', Style: render.Style{}})
-			}
-		}
-	}
 
 	if len(v.Screen)-1 > h {
 		diff := len(v.Screen) - h - 1
 		v.Scrollback = append(v.Scrollback, v.Screen[:diff]...)
 		v.Screen = v.Screen[diff:]
+	}
+
+	for y := 0; y < len(v.Screen); y++ {
+		for x := 0; x <= w; x++ {
+			if x >= len(v.Screen[y]) {
+				v.Screen[y] = append(v.Screen[y], ecma48.StyledChar{Rune: ' ', Style: ecma48.Style{}})
+			}
+		}
 	}
 
 	if v.scrollingRegion.top == 0 && v.scrollingRegion.bottom == v.h-1 {

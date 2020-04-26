@@ -16,13 +16,13 @@ type Renderer struct {
 	w, h int
 
 	writingMutex  *sync.Mutex
-	pendingScreen [][]Char
-	currentScreen [][]Char
+	pendingScreen [][]ecma48.StyledChar
+	currentScreen [][]ecma48.StyledChar
 
 	highlights [][]bool
 
-	drawingCursor Cursor
-	restingCursor Cursor
+	drawingCursor ecma48.Cursor
+	restingCursor ecma48.Cursor
 
 	Pause  chan bool
 	Resume chan bool
@@ -30,28 +30,12 @@ type Renderer struct {
 	DemoText string
 }
 
-// A PositionedChar is a Char with a specific location on the screen
-type PositionedChar struct {
-	Rune     rune
-	IsWide   bool
-	PrevWide bool
-	Cursor
-}
-
-// A Char is a rune with a visual style associated with it
-type Char struct {
-	Rune     rune
-	IsWide   bool
-	PrevWide bool
-	Style
-}
-
 // NewRenderer returns an initialized Renderer
 func NewRenderer() *Renderer {
 	return &Renderer{
 		writingMutex:  &sync.Mutex{},
-		currentScreen: [][]Char{},
-		pendingScreen: [][]Char{},
+		currentScreen: [][]ecma48.StyledChar{},
+		pendingScreen: [][]ecma48.StyledChar{},
 		Pause:         make(chan bool),
 		Resume:        make(chan bool),
 	}
@@ -64,18 +48,20 @@ func (r *Renderer) Resize(w, h int) {
 
 	r.w = w
 	r.h = h
+
+	r.HardRefresh()
 }
 
-func expandBuffer(buffer [][]Char, w, h int) [][]Char {
+func expandBuffer(buffer [][]ecma48.StyledChar, w, h int) [][]ecma48.StyledChar {
 	// resize currentScreen
 	for y := 0; y <= h; y++ {
 		if y >= len(buffer) {
-			buffer = append(buffer, []Char{})
+			buffer = append(buffer, []ecma48.StyledChar{})
 		}
 
 		for x := 0; x <= w; x++ {
 			if x >= len(buffer[y]) {
-				buffer[y] = append(buffer[y], Char{Rune: ' '})
+				buffer[y] = append(buffer[y], ecma48.StyledChar{Rune: ' '})
 			}
 		}
 	}
@@ -84,13 +70,20 @@ func expandBuffer(buffer [][]Char, w, h int) [][]Char {
 }
 
 // HandleCh places a PositionedChar in the pending screen buffer
-func (r *Renderer) HandleCh(ch PositionedChar) {
+func (r *Renderer) HandleCh(ch ecma48.PositionedChar) {
+	if ch.Y < 0 || ch.Y >= len(r.pendingScreen)-1 {
+		return
+	}
+	if ch.X < 0 || ch.X >= len(r.pendingScreen[ch.Y]) {
+		return
+	}
+
 	r.writingMutex.Lock()
 	if ch.Rune == 0 {
 		ch.Rune = ' '
 	}
 
-	r.pendingScreen[ch.Y][ch.X] = Char{
+	r.pendingScreen[ch.Y][ch.X] = ecma48.StyledChar{
 		Rune:     ch.Rune,
 		IsWide:   ch.IsWide,
 		PrevWide: ch.PrevWide,
@@ -117,7 +110,7 @@ func (r *Renderer) ListenToQueue() {
 					r.currentScreen[y][x] = pending
 
 					if !pending.PrevWide {
-						newCursor := Cursor{
+						newCursor := ecma48.Cursor{
 							X: x, Y: y, Style: pending.Style,
 						}
 
@@ -152,8 +145,8 @@ func (r *Renderer) ListenToQueue() {
 
 				for x := r.w - 2 - demoTextLen - 1; x <= r.w-2; x++ {
 					for y := r.h - 5; y <= r.h-3; y++ {
-						newCursor := Cursor{
-							X: x, Y: y, Style: Style{
+						newCursor := ecma48.Cursor{
+							X: x, Y: y, Style: ecma48.Style{
 								Bg: ecma48.Color{
 									ColorMode: ecma48.ColorBit3Bright,
 									Code:      6,
@@ -174,8 +167,8 @@ func (r *Renderer) ListenToQueue() {
 				}
 
 				for i, c := range r.DemoText {
-					newCursor := Cursor{
-						X: r.w - 2 - demoTextLen + i, Y: r.h - 4, Style: Style{
+					newCursor := ecma48.Cursor{
+						X: r.w - 2 - demoTextLen + i, Y: r.h - 4, Style: ecma48.Style{
 							Bg: ecma48.Color{
 								ColorMode: ecma48.ColorBit3Bright,
 								Code:      6,
@@ -222,26 +215,9 @@ func (r *Renderer) ListenToQueue() {
 
 // SetCursor sets the position of the physical cursor
 func (r *Renderer) SetCursor(x, y int) {
-	r.restingCursor = Cursor{
+	r.restingCursor = ecma48.Cursor{
 		X: x, Y: y, Style: r.drawingCursor.Style,
 	}
-}
-
-// Debug prints the given text to the status bar
-func (r *Renderer) Debug(s string) {
-	for i, ch := range s {
-		r.HandleCh(PositionedChar{
-			Rune: rune(ch),
-			Cursor: Cursor{
-				X: i, Y: r.h - 1,
-				Style: Style{},
-			}})
-	}
-}
-
-// GetRune returns the rune of the currentScreen at the given coordinates
-func (r *Renderer) GetRune(x, y int) rune {
-	return r.currentScreen[y][x].Rune
 }
 
 // HardRefresh force clears all cached chars. Used for handling terminal resize
@@ -250,10 +226,10 @@ func (r *Renderer) HardRefresh() {
 	fmt.Print("\033[2J")
 	fmt.Print("\033[0m")
 	fmt.Print("\033[H")
-	r.drawingCursor = Cursor{}
+	r.drawingCursor = ecma48.Cursor{}
 	for y := range r.currentScreen {
 		for x := range r.currentScreen[y] {
-			r.currentScreen[y][x] = Char{Rune: ' '}
+			r.currentScreen[y][x] = ecma48.StyledChar{}
 		}
 	}
 }

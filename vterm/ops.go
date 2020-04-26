@@ -1,13 +1,14 @@
 package vterm
 
 import (
-	"github.com/aaronjanse/3mux/render"
+	"github.com/aaronjanse/3mux/ecma48"
 )
 
 func (v *VTerm) ScrollbackReset() {
-	v.ScrollbackPos = 0
-
-	v.RedrawWindow()
+	if v.ScrollbackPos != 0 {
+		v.ScrollbackPos = 0
+		v.RedrawWindow()
+	}
 }
 
 // ScrollbackUp shifts the screen contents up, with scrollback
@@ -60,9 +61,9 @@ func (v *VTerm) scrollUp(n int) {
 		v.Scrollback = append(v.Scrollback, rows...)
 	}
 
-	newLines := make([][]render.Char, n)
+	newLines := make([][]ecma48.StyledChar, n)
 	for i := range newLines {
-		newLines[i] = make([]render.Char, v.w)
+		newLines[i] = make([]ecma48.StyledChar, v.w)
 		for x := range newLines[i] {
 			newLines[i][x].Style = v.Cursor.Style
 		}
@@ -82,9 +83,9 @@ func (v *VTerm) scrollUp(n int) {
 // scrollDown shifts the screen content down and adds blank lines to the top.
 // It does neither modifies nor reads scrollback
 func (v *VTerm) scrollDown(n int) {
-	newLines := make([][]render.Char, n)
+	newLines := make([][]ecma48.StyledChar, n)
 	for i := range newLines {
-		newLines[i] = make([]render.Char, v.w)
+		newLines[i] = make([]ecma48.StyledChar, v.w)
 	}
 
 	v.Screen =
@@ -107,6 +108,14 @@ func (v *VTerm) setCursorPos(x, y int) {
 		v.Cursor.X = v.w
 	} else {
 		v.Cursor.X = x
+	}
+
+	if y <= v.h && y >= len(v.Screen) {
+		for y := 0; y <= v.h; y++ {
+			if y >= len(v.Screen) {
+				v.Screen = append(v.Screen, make([]ecma48.StyledChar, v.w))
+			}
+		}
 	}
 
 	if y < 0 {
@@ -158,7 +167,7 @@ func (v *VTerm) putChar(ch rune, wide bool) {
 		return
 	}
 
-	char := render.Char{
+	char := ecma48.StyledChar{
 		Rune:   ch,
 		IsWide: rWidth > 1,
 		Style:  v.Cursor.Style,
@@ -168,12 +177,12 @@ func (v *VTerm) putChar(ch rune, wide bool) {
 		if v.Cursor.X >= 0 && v.Cursor.X < len(v.Screen[v.Cursor.Y])-rWidth+1 {
 			v.Screen[v.Cursor.Y][v.Cursor.X] = char
 			if rWidth > 1 { // WARN: assumes max width of two
-				v.Screen[v.Cursor.Y][v.Cursor.X+1] = render.Char{PrevWide: true, Style: v.Cursor.Style}
+				v.Screen[v.Cursor.Y][v.Cursor.X+1] = ecma48.StyledChar{PrevWide: true, Style: v.Cursor.Style}
 			}
 		}
 	}
 
-	positionedChar := render.PositionedChar{
+	positionedChar := ecma48.PositionedChar{
 		Rune:   ch,
 		IsWide: rWidth > 1,
 		Cursor: v.Cursor,
@@ -206,20 +215,36 @@ func (v *VTerm) forceRedrawWindow() {
 	if v.ScrollbackPos < v.h {
 		for y := 0; y < v.h-v.ScrollbackPos; y++ {
 			for x := 0; x < v.w; x++ {
-				if y >= len(v.Screen) || x >= len(v.Screen[y]) {
-					continue
+				var line []ecma48.StyledChar
+				if y < len(v.Screen) {
+					line = v.Screen[y]
+				} else {
+					line = make([]ecma48.StyledChar, v.w)
+					for x := range line {
+						line[x].Style = v.Cursor.Style
+					}
 				}
 
-				ch := render.PositionedChar{
-					Rune:     v.Screen[y][x].Rune,
-					IsWide:   v.Screen[y][x].IsWide,
-					PrevWide: v.Screen[y][x].PrevWide,
-					Cursor: render.Cursor{
-						X: v.x + x, Y: v.y + y + v.ScrollbackPos, Style: v.Screen[y][x].Style,
-					},
+				var ch ecma48.PositionedChar
+				if x < len(line) {
+					ch = ecma48.PositionedChar{
+						Rune:     line[x].Rune,
+						IsWide:   line[x].IsWide,
+						PrevWide: line[x].PrevWide,
+						Cursor: ecma48.Cursor{
+							X: v.x + x, Y: v.y + y + v.ScrollbackPos, Style: line[x].Style,
+						},
+					}
+					v.renderer.HandleCh(ch)
+				} else {
+					ch = ecma48.PositionedChar{
+						Rune: ' ',
+						Cursor: ecma48.Cursor{
+							X: v.x + x, Y: v.y + y + v.ScrollbackPos, Style: ecma48.Style{},
+						},
+					}
 				}
 
-				v.renderer.HandleCh(ch)
 			}
 		}
 	}
@@ -238,20 +263,20 @@ func (v *VTerm) forceRedrawWindow() {
 				idx := len(v.Scrollback) - v.ScrollbackPos + y - 1
 
 				if x < len(v.Scrollback[idx]) {
-					ch := render.PositionedChar{
+					ch := ecma48.PositionedChar{
 						Rune:     v.Scrollback[idx][x].Rune,
 						IsWide:   v.Scrollback[idx][x].IsWide,
 						PrevWide: v.Scrollback[idx][x].PrevWide,
-						Cursor: render.Cursor{
+						Cursor: ecma48.Cursor{
 							X: v.x + x, Y: v.y + y, Style: v.Scrollback[idx][x].Style,
 						},
 					}
 					v.renderer.HandleCh(ch)
 				} else {
-					ch := render.PositionedChar{
+					ch := ecma48.PositionedChar{
 						Rune: ' ',
-						Cursor: render.Cursor{
-							X: v.x + x, Y: v.y + y, Style: render.Style{},
+						Cursor: ecma48.Cursor{
+							X: v.x + x, Y: v.y + y, Style: ecma48.Style{},
 						},
 					}
 					v.renderer.HandleCh(ch)

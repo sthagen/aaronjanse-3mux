@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 
 	"github.com/aaronjanse/3mux/ecma48"
-	"github.com/aaronjanse/3mux/render"
 )
 
 type Parser struct {
@@ -28,14 +27,15 @@ const (
 	StateOscString
 )
 
-func (v *VTerm) ProcessStream(input *bufio.Reader) {
+func (v *VTerm) ProcessStdout(input *bufio.Reader) {
 	stdout := make(chan ecma48.Output, 3200000)
+	shutdown := make(chan bool)
 
 	parser := ecma48.NewParser(false)
 
 	go func() {
 		parser.Parse(input, stdout)
-		stdout <- ecma48.Output{Parsed: ecma48.EOF{}}
+		shutdown <- true
 	}()
 
 	for {
@@ -48,6 +48,8 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 				}
 				p = <-v.ChangePause
 			}
+		case <-shutdown:
+			return
 		case output := <-stdout:
 			v.runeCounter += uint64(len(output.Raw))
 
@@ -58,11 +60,13 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 				v.useFastRefresh()
 			}
 
+			if len(output.Raw) == 0 {
+				break
+			}
+
 			// log.Printf(":: %q", output.Raw)
 
 			switch x := output.Parsed.(type) {
-			case ecma48.EOF:
-				return
 			case ecma48.Char:
 				v.putChar(x.Rune, x.IsWide)
 			case ecma48.Backspace:
@@ -84,9 +88,9 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 
 			case ecma48.ICH: // insert characters
 				w := len(v.Screen[v.Cursor.Y])
-				new := make([]render.Char, w)
+				new := make([]ecma48.StyledChar, w)
 				copy(new[:v.Cursor.X], v.Screen[v.Cursor.Y][:v.Cursor.X])
-				new = append(new, make([]render.Char, x.N)...)
+				new = append(new, make([]ecma48.StyledChar, x.N)...)
 				new = append(new, v.Screen[v.Cursor.Y][v.Cursor.X:]...)
 				new = new[:w]
 				v.Screen[v.Cursor.Y] = new
@@ -95,10 +99,10 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 				if x.N > v.w-v.Cursor.X {
 					x.N = v.w - v.Cursor.X // FIXME: verify that we don't need +/- 1
 				}
-				new := make([]render.Char, len(v.Screen[v.Cursor.Y]))
+				new := make([]ecma48.StyledChar, len(v.Screen[v.Cursor.Y]))
 				copy(new[:v.Cursor.X], v.Screen[v.Cursor.Y][:v.Cursor.X])
 				new = append(new, v.Screen[v.Cursor.Y][v.Cursor.X+x.N:]...)
-				new = append(new, make([]render.Char, x.N)...)
+				new = append(new, make([]ecma48.StyledChar, x.N)...)
 				v.Screen[v.Cursor.Y] = new
 				v.RedrawWindow() // FIXME inefficient
 			case ecma48.PrivateDEC:
@@ -151,9 +155,9 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 			case ecma48.IL:
 				v.setCursorX(0)
 
-				newLines := make([][]render.Char, x.N)
+				newLines := make([][]ecma48.StyledChar, x.N)
 				for i := range newLines {
-					newLines[i] = make([]render.Char, v.w)
+					newLines[i] = make([]ecma48.StyledChar, v.w)
 					if v.Cursor.Y == v.scrollingRegion.top {
 						for x := range newLines[i] {
 							newLines[i][x].Style = v.Cursor.Style
@@ -170,9 +174,9 @@ func (v *VTerm) ProcessStream(input *bufio.Reader) {
 
 				v.RedrawWindow()
 			case ecma48.DL:
-				newLines := make([][]render.Char, x.N)
+				newLines := make([][]ecma48.StyledChar, x.N)
 				for i := range newLines {
-					newLines[i] = make([]render.Char, v.w)
+					newLines[i] = make([]ecma48.StyledChar, v.w)
 					for x := range newLines[i] {
 						newLines[i][x].Style = v.Cursor.Style
 					}
