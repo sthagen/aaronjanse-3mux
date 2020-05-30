@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 
 	mathRand "math/rand"
 
@@ -27,16 +28,27 @@ var wmCount int
 func main() {
 	log.SetOutput(ioutil.Discard)
 
-	// for i := 0; i < 8; i++ {
-	// 	go fuzzECMA48()
-	// }
+	if len(os.Args) < 2 {
+		fmt.Println("Usage:")
+		fmt.Println("go run *.go wm")
+		fmt.Println("go run *.go vterm")
+		fmt.Println("go run *.go ecma48")
+		os.Exit(1)
+	}
 
-	// for i := 0; i < 4; i++ {
-	// 	go fuzzWM()
-	// }
-
-	for i := 0; i < 8; i++ {
-		go fuzzVTerm()
+	switch os.Args[1] {
+	case "ecma48":
+		for i := 0; i < 8; i++ {
+			go fuzzECMA48()
+		}
+	case "wm":
+		for i := 0; i < 2; i++ {
+			go fuzzWM()
+		}
+	case "vterm":
+		for i := 0; i < 8; i++ {
+			go fuzzVTerm()
+		}
 	}
 
 	c := make(chan os.Signal, 1)
@@ -44,8 +56,8 @@ func main() {
 	go func() {
 		for range c {
 			p := message.NewPrinter(language.English)
-			// p.Printf("WM operations:     %d\n", wmCount)
-			// p.Printf("ECMA48 operations: %d\n", ecmaCount)
+			p.Printf("WM operations:     %d\n", wmCount)
+			p.Printf("ECMA48 operations: %d\n", ecmaCount)
 			p.Printf("VTerm operations:  %d\n", vtermCount)
 
 			os.Exit(0)
@@ -65,7 +77,7 @@ func fuzzVTerm() {
 	}()
 
 	r := &FakeRenderer{}
-	p := pane.NewPaneImpl(r, false)
+	p := pane.NewPane(r, false, "1")
 	p.SetDeathHandler(func(err error) {
 		panic(err)
 	})
@@ -100,17 +112,6 @@ func fuzzWM() {
 	var pastStates []string
 	var pastFuncNames []string
 
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println("=== WM Failed ===")
-			for i, state := range pastStates {
-				fmt.Println("State:", state)
-				fmt.Println("Func: ", pastFuncNames[i])
-			}
-			panic(r)
-		}
-	}()
-
 	r := &FakeRenderer{}
 	for {
 		var stop bool
@@ -120,18 +121,37 @@ func fuzzWM() {
 		pastStates = []string{}
 		pastFuncNames = []string{}
 
-		for count := 0; count < 32; count++ {
+		var wg sync.WaitGroup
+
+		for count := 0; count < 4; count++ {
 			name, fn := getRandomFunc()
 			pastFuncNames = append(pastFuncNames, name)
 			pastStates = append(pastStates, u.Serialize())
 
-			fn(u)
+			wg.Add(1)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("=== WM Failed ===")
+						for i, state := range pastStates {
+							fmt.Println("State:", state)
+							fmt.Println("Func: ", pastFuncNames[i])
+						}
+						panic(r)
+					}
+				}()
+
+				fn(u)
+				wg.Done()
+			}()
 
 			if u.IsDead() || stop {
 				break
 			}
 			wmCount++
 		}
+
+		wg.Wait()
 	}
 }
 

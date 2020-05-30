@@ -10,7 +10,7 @@ import (
 	"github.com/aaronjanse/3mux/ecma48"
 	"github.com/aaronjanse/3mux/vterm"
 	"github.com/aaronjanse/3mux/wm"
-	"github.com/kr/pty"
+	"github.com/aaronjanse/pty"
 )
 
 // A Pane is a tiling unit representing a terminal
@@ -37,11 +37,7 @@ type Pane struct {
 	OnDeath func(error)
 }
 
-func NewPane(renderer ecma48.Renderer) wm.Node {
-	return NewPaneImpl(renderer, true)
-}
-
-func NewPaneImpl(renderer ecma48.Renderer, realShell bool) wm.Node {
+func NewPane(renderer ecma48.Renderer, realShell bool, sessionID string) wm.Node {
 	shellPath, err := getShellPath()
 	if err != nil {
 		panic(err)
@@ -53,7 +49,7 @@ func NewPaneImpl(renderer ecma48.Renderer, realShell bool) wm.Node {
 
 	cmd := exec.Command(shellPath)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color") // FIXME we should decide whether we want 256color in $TERM
-	cmd.Env = append(cmd.Env, "THREEMUX=1")
+	cmd.Env = append(cmd.Env, fmt.Sprintf("THREEMUX=%s", sessionID))
 	t := &Pane{
 		born:     false,
 		renderer: renderer,

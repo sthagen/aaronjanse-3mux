@@ -3,6 +3,7 @@ package wm
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/aaronjanse/3mux/ecma48"
 )
@@ -19,6 +20,8 @@ type Universe struct {
 
 	helpBar         bool
 	enableStatusBar bool
+
+	wmOpMutex *sync.Mutex
 }
 
 func NewUniverse(renderer ecma48.Renderer, helpBar bool, enableStatusBar bool, onDeath func(error), renderRect Rect, newPane NewPaneFunc) *Universe {
@@ -29,6 +32,7 @@ func NewUniverse(renderer ecma48.Renderer, helpBar bool, enableStatusBar bool, o
 		renderer:        renderer,
 		helpBar:         helpBar,
 		enableStatusBar: enableStatusBar,
+		wmOpMutex:       &sync.Mutex{},
 	}
 	u.workspaces = []*workspace{newWorkspace(renderer, u, u.handleChildDeath, renderRect, newPane)}
 	u.updateSelection()
@@ -99,7 +103,7 @@ func (u *Universe) refreshRenderRect() {
 		if u.helpBar {
 			child.setRenderRect(x, y, w, h-2)
 		} else if u.enableStatusBar {
-			child.setRenderRect(x, y, w, h-1)
+			child.setRenderRect(x, y, w, h-2)
 		} else {
 			child.setRenderRect(x, y, w, h)
 		}
@@ -113,6 +117,7 @@ func (u *Universe) refreshRenderRect() {
 
 	u.redrawAllLines()
 	u.drawSelectionBorder()
+	u.drawStatusBar()
 }
 
 func (u *Universe) drawStatusBar() {
@@ -128,7 +133,7 @@ func (u *Universe) drawStatusBar() {
 		ch := ecma48.PositionedChar{
 			Rune: r,
 			Cursor: ecma48.Cursor{
-				X: i, Y: u.renderRect.H - 1,
+				X: i, Y: u.renderRect.H,
 				Style: ecma48.Style{
 					Fg: ecma48.Color{
 						ColorMode: ecma48.ColorBit3Normal,
@@ -194,6 +199,9 @@ func (u *Universe) drawHelpBar() {
 }
 
 func (u *Universe) HideHelpBar() {
+	u.wmOpMutex.Lock()
+	defer u.wmOpMutex.Unlock()
+
 	u.helpBar = false
 	u.refreshRenderRect()
 }
