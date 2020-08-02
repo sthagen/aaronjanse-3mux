@@ -75,7 +75,9 @@ func (p *Parser) Parse(input *bufio.Reader, output chan<- Output) error {
 	rand.Seed(time.Now().Unix())
 
 	go func() {
-		defer recover()
+		defer func() {
+			recover()
+		}()
 		for {
 			r, _, err := input.ReadRune()
 			if p.isDead {
@@ -244,6 +246,12 @@ func (p *Parser) stateGround(r rune) {
 
 func (p *Parser) stateEscape(r rune) {
 	switch {
+	case r == '7':
+		p.out <- p.wrap(SCOSC{})
+		p.state = stateGround
+	case r == '8':
+		p.out <- p.wrap(SCORC{})
+		p.state = stateGround
 	case strings.Contains("DEHMNOPVWXZ[\\]^_", string(r)):
 		p.anywhere(r + 0x40)
 	case 0x30 <= r && r <= 0x4F || 0x51 <= r && r <= 0x57:
