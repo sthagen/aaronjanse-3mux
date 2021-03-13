@@ -1,4 +1,4 @@
-`3mux` is a terminal multiplexer with out-of-the-box support for search, mouse-controlled scrollback, and i3-like keybindings. Imagine `tmux` with a smaller learning curve and more sane defaults.
+`3mux` is a terminal multiplexer with out-of-the-box support for search, mouse-controlled scrollback, and i3-like keybindings. Imagine `tmux` with a smaller learning curve and more user-friendly defaults.
 
 [<img src="./demo.gif" width="800"/>](https://streamable.com/m2r57p)
 
@@ -56,11 +56,18 @@
 2. `tar -zxvf YOUR_FILE.tar.gz`
 3. Add the now-extracted `./3mux` to your `$PATH`
 
+###### Using Nix flakes (requires Nix 2.4+)
+
+```
+nix run github:aaronjanse/3mux
+```
+
+
 ###### Package manager
 
 [![Packages for 3mux](https://repology.org/badge/vertical-allrepos/3mux.svg)](https://repology.org/project/3mux/versions)
 
-###### Via `go get`
+###### Building from source
 1. Install Golang
 2. `go get github.com/aaronjanse/3mux`
 3. Run `3mux` to launch the terminal multiplexer

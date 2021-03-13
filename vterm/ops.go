@@ -160,6 +160,21 @@ func (v *VTerm) shiftCursorY(diff int) {
 	v.setCursorPos(v.Cursor.X, v.Cursor.Y+diff)
 }
 
+func (v *VTerm) setChar(x, y int, r rune) {
+	if x >= v.w {
+		return
+	}
+	if y >= v.h {
+		return
+	}
+	v.Screen[y][x] = ecma48.StyledChar{Rune: r, Style: v.Cursor.Style}
+	if !v.usingSlowRefresh {
+		v.renderer.HandleCh(ecma48.PositionedChar{
+			Cursor: ecma48.Cursor{X: x + v.x, Y: y + v.y, Style: v.Cursor.Style}, Rune: r,
+		})
+	}
+}
+
 // putChar renders as given character using the cursor stored in vterm
 func (v *VTerm) putChar(ch rune, wide bool) {
 	var rWidth int
@@ -171,8 +186,10 @@ func (v *VTerm) putChar(ch rune, wide bool) {
 
 	if v.Cursor.X >= v.w-rWidth+1 {
 		v.setCursorX(0)
-		if v.Cursor.Y < v.scrollingRegion.bottom {
+		if v.Cursor.Y < v.scrollingRegion.bottom-1 {
 			v.shiftCursorY(1)
+		} else {
+			v.scrollUp(1)
 		}
 	}
 
